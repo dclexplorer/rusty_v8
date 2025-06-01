@@ -24,21 +24,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # - os: macos-13
-          #   target: x86_64-apple-darwin
-          #   variant: debug
-          #   cargo: cargo
-
-          # - os: macos-13
-          #   target: x86_64-apple-darwin
-          #   variant: release
-          #   cargo: cargo
-
-          # - os: macos-14
-          #   target: aarch64-apple-darwin
-          #   variant: asan
-          #   cargo: cargo
-
           - os: macos-14
             target: aarch64-apple-darwin
             variant: debug
@@ -69,10 +54,10 @@ jobs:
             variant: release
             cargo: cargo
 
-          # - os: ${{ github.repository == 'denoland/rusty_v8' && 'windows-2022-xxl' || 'windows-2022' }}
-          #   target: x86_64-pc-windows-msvc
-          #   variant: release # Note: we do not support windows debug builds.
-          #   cargo: cargo
+          - os: ${{ github.repository == 'denoland/rusty_v8' && 'windows-2022-xxl' || 'windows-2022' }}
+            target: x86_64-pc-windows-msvc
+            variant: release # Note: we do not support windows debug builds.
+            cargo: cargo
 
           - os: ${{ github.repository == 'denoland/rusty_v8' && 'ubuntu-22.04-xl' || 'ubuntu-22.04' }}
             target: aarch64-unknown-linux-gnu
@@ -81,6 +66,16 @@ jobs:
 
           - os: ${{ github.repository == 'denoland/rusty_v8' && 'ubuntu-22.04-xl' || 'ubuntu-22.04' }}
             target: aarch64-unknown-linux-gnu
+            variant: release
+            cargo: cargo
+
+          - os: ${{ github.repository == 'denoland/rusty_v8' && 'ubuntu-22.04-xl' || 'ubuntu-22.04' }}
+            target: aarch64-linux-android
+            variant: debug
+            cargo: cargo
+
+          - os: ${{ github.repository == 'denoland/rusty_v8' && 'ubuntu-22.04-xl' || 'ubuntu-22.04' }}
+            target: aarch64-linux-android
             variant: release
             cargo: cargo
 
@@ -126,6 +121,37 @@ jobs:
 
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/aarch64-linux-gnu-gcc-10" >> ${GITHUB_ENV}
           echo "QEMU_LD_PREFIX=/usr/aarch64-linux-gnu" >> ${GITHUB_ENV}
+
+      - name: Install cross compilation toolchain
+        if: matrix.config.target == 'aarch64-linux-android'
+        run: |
+          rustup target add aarch64-linux-android
+
+          # Install Android NDK
+          ANDROID_NDK_VERSION=r25c
+          ANDROID_NDK_HOME=$HOME/android-ndk-${ANDROID_NDK_VERSION}
+          
+          curl -LO https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip
+          unzip -q android-ndk-${ANDROID_NDK_VERSION}-linux.zip -d $HOME
+          
+          # Set up environment variables for Android cross-compilation
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> ${GITHUB_ENV}
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang" >> ${GITHUB_ENV}
+          echo "CC_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang" >> ${GITHUB_ENV}
+          echo "CXX_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++" >> ${GITHUB_ENV}
+          echo "AR_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> ${GITHUB_ENV}
+          
+          # Add sysroot and C++ include paths
+          SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          CXX_INCLUDE="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/c++/v1"
+          echo "CFLAGS_aarch64_linux_android=--sysroot=${SYSROOT}" >> ${GITHUB_ENV}
+          echo "CXXFLAGS_aarch64_linux_android=--sysroot=${SYSROOT} -I${CXX_INCLUDE}" >> ${GITHUB_ENV}
+          
+          # Set bindgen clang args for Android
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=${SYSROOT} -I${CXX_INCLUDE}" >> ${GITHUB_ENV}
+          
+          # Set GN args for Android build
+          echo "GN_ARGS=target_os=\"android\" target_cpu=\"arm64\" v8_target_cpu=\"arm64\" android_ndk_root=\"${ANDROID_NDK_HOME}\" android32_ndk_api_level=30 android64_ndk_api_level=30" >> ${GITHUB_ENV}
 
       - name: Write git_submodule_status.txt
         run: git submodule status --recursive > git_submodule_status.txt
@@ -181,6 +207,7 @@ jobs:
       - name: check c++ code formatting
         if: startsWith(matrix.config.os, 'ubuntu')
         run: |
+          sudo apt-get update
           sudo apt-get install -y clang-format
           clang-format --verbose --Werror --dry-run src/*.cc src/*.hpp src/*.h
 
